@@ -519,6 +519,19 @@
           <label>Year</label>
           <input type="number" id="report-year" value="2026" min="2020" max="2099">
         </div>
+        <div class="field">
+          <label>Category</label>
+          <select id="report-category">
+            <option value="All">All Categories</option>
+            <option>Food & Dining</option>
+            <option>Travel</option>
+            <option>Office Supplies</option>
+            <option>Utilities</option>
+            <option>Healthcare</option>
+            <option>Entertainment</option>
+            <option>Other</option>
+          </select>
+        </div>
         <button class="btn btn-primary" onclick="generateReport()" id="report-btn">📄 Generate PDF Report</button>
       </div>
     </div>
@@ -1159,18 +1172,26 @@ document.addEventListener('DOMContentLoaded', () => {
 function generateReport() {
   if (!receipts.length) { showStatus('No receipts loaded — sign in and load a folder first.', 'error'); return; }
 
-  const type  = document.getElementById('report-type').value;
-  const year  = parseInt(document.getElementById('report-year').value);
-  const month = parseInt(document.getElementById('report-month').value);
+  const type     = document.getElementById('report-type').value;
+  const year     = parseInt(document.getElementById('report-year').value);
+  const month    = parseInt(document.getElementById('report-month').value);
+  const category = document.getElementById('report-category').value;
 
-  // Filter receipts
-  const filtered = receipts.filter(r => {
+  // Filter receipts by period
+  let filtered = receipts.filter(r => {
     if (!r.date) return false;
     const d = new Date(r.date + 'T00:00:00');
     if (type === 'year')  return d.getFullYear() === year;
     if (type === 'month') return d.getFullYear() === year && d.getMonth() === month;
     return false;
-  }).sort((a, b) => new Date(a.date) - new Date(b.date));
+  });
+
+  // Filter by category
+  if (category !== 'All') {
+    filtered = filtered.filter(r => r.category === category);
+  }
+
+  filtered = filtered.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   if (!filtered.length) { showStatus('No receipts found for that period.', 'error'); return; }
 
@@ -1190,8 +1211,13 @@ function generateReport() {
 
   // Period label
   const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const periodLabel = type === 'year' ? `Year-End ${year} (January 1 – December 31, ${year})` : `${monthNames[month]} ${year}`;
-  const reportTitle = type === 'year' ? `${year} Annual Expense Report` : `${monthNames[month]} ${year} Expense Report`;
+  const catLabel    = category === 'All' ? '' : ` ${category}`;
+  const periodLabel = type === 'year'
+    ? `Year-End ${year} (January 1 – December 31, ${year})`
+    : `${monthNames[month]} ${year}`;
+  const reportTitle = type === 'year'
+    ? `${year}${catLabel} Annual Receipts Report`
+    : `${monthNames[month]} ${year}${catLabel} Receipts Report`;
 
   // Build print window HTML
   const html = `<!DOCTYPE html>
@@ -1259,8 +1285,8 @@ function generateReport() {
 
 <div class="header">
   <div style="font-size:10px;letter-spacing:0.15em;text-transform:uppercase;color:#c8b99a;margin-bottom:8px;">Receipt Scanner</div>
-  <h1>${type === 'year' ? `<span>${year}</span> Annual Expense Report` : `${monthNames[month]} <span>${year}</span> Expense Report`}</h1>
-  <div class="period">${periodLabel}</div>
+  <h1>${reportTitle}</h1>
+  <div class="period">${periodLabel}${category !== 'All' ? ` · ${category}` : ''}</div>
   <div class="generated">Generated ${new Date().toLocaleDateString('en-US', {month:'long',day:'numeric',year:'numeric'})}</div>
 </div>
 
