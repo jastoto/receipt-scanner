@@ -657,6 +657,7 @@ function handleAuth() {
 function signOut() {
   accessToken = null;
   folderId = null;
+  receipts = [];
   document.getElementById('auth-btn').textContent = 'Sign in to Google';
   document.getElementById('auth-btn').classList.remove('signed-in');
   document.getElementById('upload-btn').disabled = true;
@@ -831,6 +832,7 @@ async function resolveFolder(showMsg) {
   tag.textContent = parts[parts.length - 1];
   tag.style.display = '';
   if (showMsg) showStatus(`Folder "${fullPath}" ready ✓`, 'success');
+  await loadReceiptsFromDrive();
 }
 
 // ═══════════════════════════════════════════
@@ -880,27 +882,8 @@ async function uploadReceipt() {
     const data = await res.json();
     if (data.error) throw new Error(data.error.message);
 
-    // Save to local history — NO thumbnail stored to avoid localStorage quota
-    const entry = {
-      id: data.id,
-      name: data.name,
-      webViewLink: data.webViewLink,
-      vendor, amount, date, category, notes,
-      uploadedAt: new Date().toISOString()
-    };
-    receipts.unshift(entry);
-    // Trim to last 200 entries to stay well within quota
-    if (receipts.length > 200) receipts = receipts.slice(0, 200);
-    try {
-      localStorage.setItem('receipts', JSON.stringify(receipts));
-    } catch(e) {
-      // If still over quota, clear old entries and retry
-      receipts = receipts.slice(0, 50);
-      localStorage.setItem('receipts', JSON.stringify(receipts));
-    }
-
     showStatus(`✓ Uploaded "${filename}" to Google Drive!`, 'success');
-    renderHistory();
+    await loadReceiptsFromDrive();
     clearFile();
     resetForm();
 
@@ -915,8 +898,48 @@ async function uploadReceipt() {
 }
 
 // ═══════════════════════════════════════════
-//  HISTORY
+//  HISTORY — loaded from Google Drive
 // ═══════════════════════════════════════════
+async function loadReceiptsFromDrive() {
+  const list = document.getElementById('history-list');
+  if (!accessToken || !folderId) {
+    list.innerHTML = '<div id="empty-history"><span class="big">🗂</span>Sign in to Google Drive to see<br>your uploaded receipts here.</div>';
+    return;
+  }
+
+  list.innerHTML = '<div id="empty-history"><span class="big" style="font-size:1.4rem">⏳</span> Loading receipts from Drive…</div>';
+
+  try {
+    const q = encodeURIComponent(`'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed=false`);
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,description,webViewLink,createdTime)&orderBy=createdTime desc&pageSize=200`,
+      { headers: { Authorization: 'Bearer ' + accessToken } }
+    );
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+
+    receipts = (data.files || []).map(f => {
+      let meta = {};
+      try { meta = JSON.parse(f.description || '{}'); } catch(e) {}
+      return {
+        id: f.id,
+        name: f.name,
+        webViewLink: f.webViewLink,
+        vendor:   meta.vendor   || '',
+        amount:   meta.amount   || '',
+        date:     meta.date     || f.createdTime?.slice(0,10) || '',
+        category: meta.category || '',
+        notes:    meta.notes    || '',
+        uploadedAt: f.createdTime || ''
+      };
+    });
+
+    renderHistory();
+  } catch(err) {
+    list.innerHTML = `<div id="empty-history"><span class="big">⚠️</span>Could not load from Drive:<br>${err.message}</div>`;
+  }
+}
+
 function renderHistory() {
   const list = document.getElementById('history-list');
   if (!accessToken) {
@@ -1038,7 +1061,7 @@ async function saveEdit() {
 
   localStorage.setItem('receipts', JSON.stringify(receipts));
   closeEdit();
-  renderHistory();
+  await loadReceiptsFromDrive();
   showStatus('Receipt updated ✓', 'success');
 }
 
@@ -1081,9 +1104,8 @@ async function confirmDelete() {
 function confirmDeleteLocal() {
   if (deleteIndex === null) return;
   receipts.splice(deleteIndex, 1);
-  localStorage.setItem('receipts', JSON.stringify(receipts));
   closeConfirm();
-  renderHistory();
+  loadReceiptsFromDrive();
   showStatus('Receipt deleted ✓', 'success');
 }
 
@@ -1106,7 +1128,6 @@ function tryAutoLogin() {
         document.getElementById('config-banner').style.display = 'none';
         updateUploadBtn();
         await resolveFolder(false);
-        renderHistory();
       }
     });
     client.requestAccessToken();
@@ -1118,26 +1139,12 @@ window.addEventListener('load', () => {
   if (localStorage.getItem(CLIENT_ID_KEY)) {
     document.getElementById('config-banner').style.display = 'none';
   }
-  // Migrate old receipts — strip any large thumb fields to free up quota
-  try {
-    const raw = localStorage.getItem('receipts');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const cleaned = parsed.map(r => { const { thumb, ...rest } = r; return rest; });
-      localStorage.setItem('receipts', JSON.stringify(cleaned));
-      receipts = cleaned;
-    }
-  } catch(e) {
-    localStorage.removeItem('receipts');
-    receipts = [];
-  }
   renderHistory();
 
   // ═══════════════════════════════════════════
   //  PWA — SERVICE WORKER + INSTALL PROMPT
   // ═══════════════════════════════════════════
   if ('serviceWorker' in navigator) {
-    // Inline service worker via blob so no separate file is needed
     const swCode = `
       const CACHE = 'receipt-scanner-v1';
       self.addEventListener('install', e => {
