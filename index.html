@@ -490,6 +490,38 @@
         <button class="btn btn-secondary" onclick="resolveFolder(true)">↻ Refresh / Create Folder</button>
       </div>
     </div>
+
+    <!-- Reports panel -->
+    <div class="panel" style="margin-top:20px;">
+      <div class="panel-head">📊 Reports</div>
+      <div class="panel-body">
+        <div class="row">
+          <div class="field">
+            <label>Report Type</label>
+            <select id="report-type">
+              <option value="month">Monthly</option>
+              <option value="year">Year-End (Jan–Dec)</option>
+            </select>
+          </div>
+          <div class="field" id="report-month-wrap">
+            <label>Month</label>
+            <select id="report-month">
+              <option value="0">January</option><option value="1">February</option>
+              <option value="2">March</option><option value="3">April</option>
+              <option value="4">May</option><option value="5">June</option>
+              <option value="6">July</option><option value="7">August</option>
+              <option value="8">September</option><option value="9">October</option>
+              <option value="10">November</option><option value="11">December</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Year</label>
+          <input type="number" id="report-year" value="2026" min="2020" max="2099">
+        </div>
+        <button class="btn btn-primary" onclick="generateReport()" id="report-btn">📄 Generate PDF Report</button>
+      </div>
+    </div>
   </div>
 
 </main>
@@ -1110,8 +1142,206 @@ function confirmDeleteLocal() {
 }
 
 // ═══════════════════════════════════════════
-//  AUTO LOGIN
+//  REPORTS
 // ═══════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  // Set current month/year as default
+  const now = new Date();
+  document.getElementById('report-month').value = now.getMonth();
+  document.getElementById('report-year').value  = now.getFullYear();
+
+  document.getElementById('report-type').addEventListener('change', function() {
+    document.getElementById('report-month-wrap').style.display =
+      this.value === 'month' ? '' : 'none';
+  });
+});
+
+function generateReport() {
+  if (!receipts.length) { showStatus('No receipts loaded — sign in and load a folder first.', 'error'); return; }
+
+  const type  = document.getElementById('report-type').value;
+  const year  = parseInt(document.getElementById('report-year').value);
+  const month = parseInt(document.getElementById('report-month').value);
+
+  // Filter receipts
+  const filtered = receipts.filter(r => {
+    if (!r.date) return false;
+    const d = new Date(r.date + 'T00:00:00');
+    if (type === 'year')  return d.getFullYear() === year;
+    if (type === 'month') return d.getFullYear() === year && d.getMonth() === month;
+    return false;
+  }).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  if (!filtered.length) { showStatus('No receipts found for that period.', 'error'); return; }
+
+  // Compute stats
+  const parseAmt = r => parseFloat((r.amount || '0').replace(/[^0-9.-]/g,'')) || 0;
+  const total    = filtered.reduce((s, r) => s + parseAmt(r), 0);
+  const avg      = total / filtered.length;
+  const highest  = filtered.reduce((h, r) => parseAmt(r) > parseAmt(h) ? r : h, filtered[0]);
+
+  // Category totals
+  const catTotals = {};
+  filtered.forEach(r => {
+    const cat = r.category || 'Other';
+    catTotals[cat] = (catTotals[cat] || 0) + parseAmt(r);
+  });
+  const catSorted = Object.entries(catTotals).sort((a,b) => b[1]-a[1]);
+
+  // Period label
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const periodLabel = type === 'year' ? `Year-End ${year} (January 1 – December 31, ${year})` : `${monthNames[month]} ${year}`;
+  const reportTitle = type === 'year' ? `${year} Annual Expense Report` : `${monthNames[month]} ${year} Expense Report`;
+
+  // Build print window HTML
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>${reportTitle}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Mono', monospace; background: #fff; color: #1a1208; font-size: 11px; }
+
+  .header { background: #1a1208; color: #f5f0e8; padding: 28px 36px; }
+  .header h1 { font-family: 'Fraunces', serif; font-weight: 300; font-size: 26px; margin-bottom: 4px; }
+  .header h1 span { color: #c8401a; font-style: italic; }
+  .header .period { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #c8b99a; margin-top: 6px; }
+  .header .generated { font-size: 10px; color: #7a6e5e; margin-top: 4px; }
+
+  .content { padding: 28px 36px; }
+
+  /* Stats row */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
+  .stat-box { border: 1.5px solid #c8b99a; padding: 14px; }
+  .stat-box .label { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: #7a6e5e; margin-bottom: 6px; }
+  .stat-box .value { font-size: 18px; font-family: 'Fraunces', serif; font-weight: 700; color: #1a1208; }
+  .stat-box .sub { font-size: 9px; color: #7a6e5e; margin-top: 3px; }
+
+  /* Category summary */
+  h2 { font-family: 'Fraunces', serif; font-weight: 300; font-size: 14px; margin-bottom: 12px; border-bottom: 2px solid #1a1208; padding-bottom: 6px; }
+  .cat-table { width: 100%; border-collapse: collapse; margin-bottom: 28px; }
+  .cat-table th { background: #1a1208; color: #f5f0e8; padding: 7px 10px; text-align: left; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 400; }
+  .cat-table td { padding: 7px 10px; border-bottom: 1px solid #ede6d6; }
+  .cat-table tr:last-child td { border-bottom: none; }
+  .cat-table .total-row td { background: #f5f0e8; font-weight: 500; border-top: 2px solid #1a1208; }
+  .bar-wrap { background: #ede6d6; height: 8px; width: 100%; }
+  .bar-fill { background: #2a6b3c; height: 8px; }
+
+  /* Receipt table */
+  .receipt-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+  .receipt-table th { background: #1a1208; color: #f5f0e8; padding: 7px 10px; text-align: left; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 400; }
+  .receipt-table td { padding: 6px 10px; border-bottom: 1px solid #ede6d6; vertical-align: top; }
+  .receipt-table tr:nth-child(even) td { background: #faf7f2; }
+  .receipt-table tr:last-child td { border-bottom: none; }
+  .receipt-table .amt { color: #2a6b3c; font-weight: 500; white-space: nowrap; }
+  .receipt-table .notes { color: #7a6e5e; font-size: 10px; }
+
+  .footer { margin-top: 36px; padding-top: 12px; border-top: 1px solid #c8b99a; font-size: 9px; color: #7a6e5e; display: flex; justify-content: space-between; }
+
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .no-print { display: none; }
+  }
+
+  .print-btn {
+    position: fixed; top: 16px; right: 16px;
+    background: #c8401a; color: white; border: none;
+    padding: 10px 20px; font-family: 'DM Mono', monospace;
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer; z-index: 999;
+  }
+</style>
+</head>
+<body>
+<button class="print-btn no-print" onclick="window.print()">⬇ Download PDF</button>
+
+<div class="header">
+  <div style="font-size:10px;letter-spacing:0.15em;text-transform:uppercase;color:#c8b99a;margin-bottom:8px;">Receipt Scanner</div>
+  <h1>${type === 'year' ? `<span>${year}</span> Annual Expense Report` : `${monthNames[month]} <span>${year}</span> Expense Report`}</h1>
+  <div class="period">${periodLabel}</div>
+  <div class="generated">Generated ${new Date().toLocaleDateString('en-US', {month:'long',day:'numeric',year:'numeric'})}</div>
+</div>
+
+<div class="content">
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat-box">
+      <div class="label">Total Spent</div>
+      <div class="value">$${total.toFixed(2)}</div>
+      <div class="sub">${filtered.length} receipt${filtered.length !== 1 ? 's' : ''}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">Avg per Receipt</div>
+      <div class="value">$${avg.toFixed(2)}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">Highest Receipt</div>
+      <div class="value">$${parseAmt(highest).toFixed(2)}</div>
+      <div class="sub">${highest.vendor || highest.name}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">Categories</div>
+      <div class="value">${catSorted.length}</div>
+    </div>
+  </div>
+
+  <!-- Category Summary -->
+  <h2>Spending by Category</h2>
+  <table class="cat-table">
+    <thead><tr><th>Category</th><th>Total</th><th>% of Spend</th><th style="width:180px;">Breakdown</th></tr></thead>
+    <tbody>
+      ${catSorted.map(([cat, amt]) => `
+        <tr>
+          <td>${cat}</td>
+          <td>$${amt.toFixed(2)}</td>
+          <td>${((amt/total)*100).toFixed(1)}%</td>
+          <td><div class="bar-wrap"><div class="bar-fill" style="width:${((amt/total)*100).toFixed(1)}%"></div></div></td>
+        </tr>
+      `).join('')}
+      <tr class="total-row">
+        <td>Total</td>
+        <td>$${total.toFixed(2)}</td>
+        <td>100%</td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Receipt Line Items -->
+  <h2>Individual Receipts</h2>
+  <table class="receipt-table">
+    <thead><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Amount</th><th>Notes</th></tr></thead>
+    <tbody>
+      ${filtered.map(r => `
+        <tr>
+          <td>${r.date || '—'}</td>
+          <td>${r.vendor || r.name}</td>
+          <td>${r.category || '—'}</td>
+          <td class="amt">$${parseAmt(r).toFixed(2)}</td>
+          <td class="notes">${r.notes || ''}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <span>Receipt Scanner · ${periodLabel}</span>
+    <span>Total: $${total.toFixed(2)} across ${filtered.length} receipt${filtered.length !== 1 ? 's' : ''}</span>
+  </div>
+
+</div>
+<script>window.onload = () => setTimeout(() => window.print(), 600);<\/script>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+}
+
+
 function tryAutoLogin() {
   const clientId = localStorage.getItem(CLIENT_ID_KEY);
   if (!clientId) return;
