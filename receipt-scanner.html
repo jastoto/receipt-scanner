@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Receipt Scanner</title>
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Receipts">
+<meta name="theme-color" content="#1a1208">
+<link rel="manifest" href="manifest.json">
+<!-- PWA icons (inline SVG as data URI for self-contained deployment) -->
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' fill='%231a1208'/%3E%3Ctext x='90' y='115' font-size='80' text-anchor='middle'%3E🧾%3C/text%3E%3C/svg%3E">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&display=swap');
 
@@ -236,28 +244,66 @@
   #status.info { border-color: #2a6b9c; background: rgba(42,107,156,0.06); color: #2a6b9c; }
 
   /* ── History ── */
-  #history-list { max-height: 420px; overflow-y: auto; }
+  #history-list { max-height: 480px; overflow-y: auto; }
   .receipt-item {
     border-bottom: 1px solid var(--border);
     padding: 12px 0;
     display: grid;
-    grid-template-columns: 48px 1fr auto;
-    gap: 12px;
+    grid-template-columns: 48px 1fr auto auto;
+    gap: 10px;
     align-items: center;
     animation: fadeIn 0.3s ease;
   }
   @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
   .receipt-item:last-child { border-bottom: none; }
-  .receipt-thumb {
-    width: 48px; height: 48px;
-    object-fit: cover;
-    border: 1px solid var(--border);
-  }
   .receipt-info .name { font-size: 0.85rem; font-weight: 500; }
   .receipt-info .meta { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
-  .receipt-amount { font-size: 0.9rem; color: var(--accent2); font-weight: 500; }
+  .receipt-amount { font-size: 0.9rem; color: var(--accent2); font-weight: 500; white-space: nowrap; }
   .receipt-link { display: block; font-size: 0.72rem; color: var(--muted); text-decoration: none; margin-top: 2px; }
   .receipt-link:hover { color: var(--accent); }
+
+  .action-btns { display: flex; flex-direction: column; gap: 4px; }
+  .btn-icon {
+    background: transparent;
+    border: 1px solid var(--border);
+    width: 28px; height: 28px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+    color: var(--muted);
+  }
+  .btn-icon:hover { border-color: var(--accent); color: var(--accent); background: rgba(200,64,26,0.06); }
+  .btn-icon.del:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Edit Modal ── */
+  #edit-modal {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(26,18,8,0.75);
+    z-index: 300;
+    align-items: center;
+    justify-content: center;
+  }
+  #edit-modal.open { display: flex; }
+  #edit-modal .modal-box h2 { font-family: 'Fraunces', serif; font-weight: 300; font-size: 1.3rem; margin-bottom: 18px; }
+
+  /* ── Confirm Modal ── */
+  #confirm-modal {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(26,18,8,0.75);
+    z-index: 400;
+    align-items: center;
+    justify-content: center;
+  }
+  #confirm-modal.open { display: flex; }
+  #confirm-modal .modal-box { max-width: 380px; }
+  #confirm-modal h3 { font-family: 'Fraunces', serif; font-weight: 300; font-size: 1.1rem; margin-bottom: 10px; }
+  #confirm-modal p { font-size: 0.82rem; color: var(--muted); margin-bottom: 20px; line-height: 1.6; }
+  .confirm-btns { display: flex; gap: 10px; }
+  .btn-danger { background: var(--accent); color: white; border: none; padding: 10px 20px; font-family: 'DM Mono',monospace; font-size:0.78rem; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; flex:1; transition: all 0.2s; }
+  .btn-danger:hover { background: #a83214; }
 
   #empty-history {
     text-align: center;
@@ -469,6 +515,72 @@
       <button class="btn btn-primary" style="flex:1" onclick="saveConfig()">Save & Close</button>
       <button class="btn btn-secondary" style="flex:0 0 auto;width:auto;" onclick="closeConfig()">Cancel</button>
     </div>
+  </div>
+</div>
+
+<!-- ══ EDIT MODAL ══ -->
+<div id="edit-modal">
+  <div class="modal-box">
+    <h2>Edit Receipt</h2>
+    <input type="hidden" id="edit-id">
+    <div class="field">
+      <label>Vendor / Store Name</label>
+      <input type="text" id="edit-vendor">
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Amount</label>
+        <input type="text" id="edit-amount">
+      </div>
+      <div class="field">
+        <label>Date</label>
+        <input type="date" id="edit-date">
+      </div>
+    </div>
+    <div class="field">
+      <label>Category</label>
+      <select id="edit-category">
+        <option>Food & Dining</option>
+        <option>Travel</option>
+        <option>Office Supplies</option>
+        <option>Utilities</option>
+        <option>Healthcare</option>
+        <option>Entertainment</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Notes</label>
+      <textarea id="edit-notes"></textarea>
+    </div>
+    <div class="field">
+      <label>Replace Image (optional)</label>
+      <div id="edit-drop-zone" onclick="document.getElementById('edit-file-input').click()"
+        style="border:2px dashed var(--border);padding:16px;text-align:center;cursor:pointer;font-size:0.8rem;color:var(--muted);transition:all 0.2s;"
+        ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+        ondragleave="this.style.borderColor='var(--border)'"
+        ondrop="handleEditDrop(event)">
+        <span id="edit-file-label">Click or drag to replace image</span>
+      </div>
+      <input type="file" id="edit-file-input" accept="image/*,application/pdf" style="display:none" onchange="handleEditFile(this.files[0])">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:6px;">
+      <button class="btn btn-primary" style="flex:1" onclick="saveEdit()">Save Changes</button>
+      <button class="btn btn-secondary" style="flex:0 0 auto;width:auto;" onclick="closeEdit()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ CONFIRM DELETE MODAL ══ -->
+<div id="confirm-modal">
+  <div class="modal-box">
+    <h3>Delete Receipt?</h3>
+    <p id="confirm-msg">This will remove the receipt from your history and Google Drive.</p>
+    <div class="confirm-btns">
+      <button class="btn-danger" onclick="confirmDelete()">Delete from Drive + History</button>
+      <button class="btn btn-secondary" style="flex:1;margin-top:0;" onclick="confirmDeleteLocal()">History Only</button>
+    </div>
+    <button class="btn btn-secondary" style="margin-top:8px;" onclick="closeConfirm()">Cancel</button>
   </div>
 </div>
 
@@ -808,8 +920,8 @@ function renderHistory() {
     list.innerHTML = '<div id="empty-history"><span class="big">🧾</span>No receipts uploaded yet.<br>Add your first one on the left!</div>';
     return;
   }
-  list.innerHTML = receipts.map(r => `
-    <div class="receipt-item">
+  list.innerHTML = receipts.map((r, i) => `
+    <div class="receipt-item" id="item-${i}">
       <div style="width:48px;height:48px;background:var(--paper2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;">🧾</div>
       <div class="receipt-info">
         <div class="name">${r.vendor || r.name}</div>
@@ -817,6 +929,10 @@ function renderHistory() {
         ${r.webViewLink ? `<a class="receipt-link" href="${r.webViewLink}" target="_blank">↗ Open in Drive</a>` : ''}
       </div>
       <div class="receipt-amount">${r.amount || '—'}</div>
+      <div class="action-btns">
+        <button class="btn-icon" title="Edit" onclick="openEdit(${i})">✎</button>
+        <button class="btn-icon del" title="Delete" onclick="openConfirm(${i})">✕</button>
+      </div>
     </div>
   `).join('');
 }
@@ -838,6 +954,158 @@ function resetForm() {
   document.getElementById('f-category').value = 'Food & Dining';
 }
 
+// ═══════════════════════════════════════════
+//  EDIT
+// ═══════════════════════════════════════════
+let editIndex = null;
+let editFile  = null;
+
+function openEdit(i) {
+  editIndex = i;
+  editFile  = null;
+  const r = receipts[i];
+  document.getElementById('edit-vendor').value   = r.vendor   || '';
+  document.getElementById('edit-amount').value   = r.amount   || '';
+  document.getElementById('edit-date').value     = r.date     || '';
+  document.getElementById('edit-category').value = r.category || 'Other';
+  document.getElementById('edit-notes').value    = r.notes    || '';
+  document.getElementById('edit-file-label').textContent = 'Click or drag to replace image';
+  document.getElementById('edit-file-input').value = '';
+  document.getElementById('edit-modal').classList.add('open');
+}
+
+function closeEdit() {
+  document.getElementById('edit-modal').classList.remove('open');
+  editIndex = null;
+  editFile  = null;
+}
+
+function handleEditDrop(e) {
+  e.preventDefault();
+  document.getElementById('edit-drop-zone').style.borderColor = 'var(--border)';
+  handleEditFile(e.dataTransfer.files[0]);
+}
+
+function handleEditFile(file) {
+  if (!file) return;
+  editFile = file;
+  document.getElementById('edit-file-label').textContent = '✓ ' + file.name;
+  document.getElementById('edit-drop-zone').style.borderColor = 'var(--accent2)';
+}
+
+async function saveEdit() {
+  if (editIndex === null) return;
+  const r = receipts[editIndex];
+  r.vendor   = document.getElementById('edit-vendor').value;
+  r.amount   = document.getElementById('edit-amount').value;
+  r.date     = document.getElementById('edit-date').value;
+  r.category = document.getElementById('edit-category').value;
+  r.notes    = document.getElementById('edit-notes').value;
+
+  const descPayload = { vendor: r.vendor, amount: r.amount, date: r.date, category: r.category, notes: r.notes };
+
+  if (accessToken && r.id) {
+    try {
+      if (editFile) {
+        // Re-upload new image content to the same Drive file
+        const form = new FormData();
+        form.append('metadata', new Blob([JSON.stringify({ description: JSON.stringify(descPayload) })], { type: 'application/json' }));
+        form.append('file', editFile);
+        const res = await fetch(
+          `https://www.googleapis.com/upload/drive/v3/files/${r.id}?uploadType=multipart&fields=id,webViewLink,name`,
+          { method: 'PATCH', headers: { Authorization: 'Bearer ' + accessToken }, body: form }
+        );
+        const data = await res.json();
+        if (data.name) r.name = data.name;
+        if (data.webViewLink) r.webViewLink = data.webViewLink;
+      } else {
+        // Metadata-only update
+        await fetch(`https://www.googleapis.com/drive/v3/files/${r.id}`, {
+          method: 'PATCH',
+          headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description: JSON.stringify(descPayload) })
+        });
+      }
+    } catch(e) { showStatus('Drive update failed: ' + e.message, 'error'); }
+  }
+
+  localStorage.setItem('receipts', JSON.stringify(receipts));
+  closeEdit();
+  renderHistory();
+  showStatus('Receipt updated ✓', 'success');
+}
+
+// ═══════════════════════════════════════════
+//  DELETE
+// ═══════════════════════════════════════════
+let deleteIndex = null;
+
+function openConfirm(i) {
+  deleteIndex = i;
+  const r = receipts[i];
+  document.getElementById('confirm-msg').textContent =
+    `"${r.vendor || r.name}" — ${r.date || 'no date'} — ${r.amount || 'no amount'}`;
+  document.getElementById('confirm-modal').classList.add('open');
+}
+
+function closeConfirm() {
+  document.getElementById('confirm-modal').classList.remove('open');
+  deleteIndex = null;
+}
+
+async function confirmDelete() {
+  if (deleteIndex === null) return;
+  const r = receipts[deleteIndex];
+
+  // Delete from Google Drive
+  if (accessToken && r.id) {
+    try {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${r.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + accessToken }
+      });
+    } catch(e) {
+      showStatus('Could not delete from Drive: ' + e.message, 'error');
+    }
+  }
+  confirmDeleteLocal();
+}
+
+function confirmDeleteLocal() {
+  if (deleteIndex === null) return;
+  receipts.splice(deleteIndex, 1);
+  localStorage.setItem('receipts', JSON.stringify(receipts));
+  closeConfirm();
+  renderHistory();
+  showStatus('Receipt deleted ✓', 'success');
+}
+
+// ═══════════════════════════════════════════
+//  AUTO LOGIN
+// ═══════════════════════════════════════════
+function tryAutoLogin() {
+  const clientId = localStorage.getItem(CLIENT_ID_KEY);
+  if (!clientId) return;
+  try {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: SCOPES,
+      prompt: '',  // empty = silent if already consented
+      callback: async (resp) => {
+        if (resp.error) return; // silently fail, user can click manually
+        accessToken = resp.access_token;
+        document.getElementById('auth-btn').textContent = 'Sign Out';
+        document.getElementById('auth-btn').classList.add('signed-in');
+        document.getElementById('config-banner').style.display = 'none';
+        updateUploadBtn();
+        await resolveFolder(false);
+        renderHistory();
+      }
+    });
+    client.requestAccessToken();
+  } catch(e) { /* GSI not loaded yet, ignore */ }
+}
+
 // ── Init ──
 window.addEventListener('load', () => {
   if (localStorage.getItem(CLIENT_ID_KEY)) {
@@ -848,10 +1116,7 @@ window.addEventListener('load', () => {
     const raw = localStorage.getItem('receipts');
     if (raw) {
       const parsed = JSON.parse(raw);
-      const cleaned = parsed.map(r => {
-        const { thumb, ...rest } = r;
-        return rest;
-      });
+      const cleaned = parsed.map(r => { const { thumb, ...rest } = r; return rest; });
       localStorage.setItem('receipts', JSON.stringify(cleaned));
       receipts = cleaned;
     }
@@ -860,6 +1125,32 @@ window.addEventListener('load', () => {
     receipts = [];
   }
   renderHistory();
+
+  // ═══════════════════════════════════════════
+  //  PWA — SERVICE WORKER + INSTALL PROMPT
+  // ═══════════════════════════════════════════
+  if ('serviceWorker' in navigator) {
+    // Inline service worker via blob so no separate file is needed
+    const swCode = `
+      const CACHE = 'receipt-scanner-v1';
+      self.addEventListener('install', e => {
+        e.waitUntil(caches.open(CACHE).then(c => c.addAll(['/receipt-scanner/'])));
+        self.skipWaiting();
+      });
+      self.addEventListener('fetch', e => {
+        e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+      });
+    `;
+    const blob = new Blob([swCode], { type: 'application/javascript' });
+    const swUrl = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(swUrl).catch(() => {});
+  }
+  const checkGSI = setInterval(() => {
+    if (window.google && google.accounts) {
+      clearInterval(checkGSI);
+      tryAutoLogin();
+    }
+  }, 300);
 });
 </script>
 </body>
