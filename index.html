@@ -562,6 +562,11 @@
       <label>Claude API Key (for AI auto-extract)</label>
       <input type="text" id="claude-key-input" placeholder="sk-ant-…" style="font-size:0.78rem;">
     </div>
+    <div class="field">
+      <label>Google Drive Folder ID (optional — overrides folder name)</label>
+      <input type="text" id="folder-id-input" placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs" style="font-size:0.78rem;">
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:4px;">Paste the folder ID from the Drive URL. All uploads will go directly to this folder.</div>
+    </div>
     <p style="font-size:0.76rem;color:var(--muted);">Keys are saved to <strong>localStorage</strong> in your browser only and never sent anywhere except the respective APIs.</p>
     <div style="display:flex;gap:10px;margin-top:18px;">
       <button class="btn btn-primary" style="flex:1" onclick="saveConfig()">Save & Close</button>
@@ -656,18 +661,21 @@ const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 //  CONFIG MODAL
 // ═══════════════════════════════════════════
 function openConfig() {
-  document.getElementById('client-id-input').value = localStorage.getItem(CLIENT_ID_KEY) || '';
+  document.getElementById('client-id-input').value  = localStorage.getItem(CLIENT_ID_KEY)  || '';
   document.getElementById('claude-key-input').value = localStorage.getItem(CLAUDE_KEY_KEY) || '';
+  document.getElementById('folder-id-input').value  = localStorage.getItem('gdr_folder_id') || '';
   document.getElementById('config-modal').classList.add('open');
 }
 function closeConfig() {
   document.getElementById('config-modal').classList.remove('open');
 }
 function saveConfig() {
-  const cid = document.getElementById('client-id-input').value.trim();
+  const cid  = document.getElementById('client-id-input').value.trim();
   const ckey = document.getElementById('claude-key-input').value.trim();
-  if (cid) localStorage.setItem(CLIENT_ID_KEY, cid);
+  const fid  = document.getElementById('folder-id-input').value.trim();
+  if (cid)  localStorage.setItem(CLIENT_ID_KEY, cid);
   if (ckey) localStorage.setItem(CLAUDE_KEY_KEY, ckey);
+  if (fid)  { localStorage.setItem('gdr_folder_id', fid); folderId = fid; }
   closeConfig();
   if (cid) document.getElementById('config-banner').style.display = 'none';
   showStatus('Config saved. Click "Sign in to Google" to authenticate.', 'info');
@@ -838,6 +846,20 @@ async function extractWithAI() {
 // ═══════════════════════════════════════════
 async function resolveFolder(showMsg) {
   if (!accessToken) return;
+
+  // Use saved folder ID directly if available
+  const savedFolderId = localStorage.getItem('gdr_folder_id');
+  if (savedFolderId) {
+    folderId = savedFolderId;
+    const statusEl = document.getElementById('folder-status');
+    statusEl.textContent = `✓ Using folder ID: ${savedFolderId.slice(0,12)}…`;
+    const tag = document.getElementById('folder-tag');
+    tag.textContent = document.getElementById('folder-name').value.split('/').pop() || 'Shared';
+    tag.style.display = '';
+    if (showMsg) showStatus('Using saved folder ID ✓', 'success');
+    await loadReceiptsFromDrive();
+    return;
+  }
   const fullPath = document.getElementById('folder-name').value.trim() || 'Receipts';
   const parts = fullPath.split('/').map(p => p.trim()).filter(Boolean);
   const statusEl = document.getElementById('folder-status');
@@ -1403,6 +1425,9 @@ window.addEventListener('load', () => {
   if (localStorage.getItem(CLIENT_ID_KEY)) {
     document.getElementById('config-banner').style.display = 'none';
   }
+  // Load saved folder ID
+  const savedFolderId = localStorage.getItem('gdr_folder_id');
+  if (savedFolderId) folderId = savedFolderId;
   renderHistory();
 
   // ═══════════════════════════════════════════
